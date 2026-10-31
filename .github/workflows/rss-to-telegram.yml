@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       replay_recent:
-        description: 'Einmalig bis zu 15 RSS-Videos prüfen (nur über 2 Minuten posten)'
+        description: 'Einmalig die letzten 15 Videos erneut posten'
         required: false
         type: boolean
         default: false
@@ -22,8 +22,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install video metadata reader
-        run: python -m pip install 'yt-dlp>=2025.1.1'
       - name: Post videos
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
