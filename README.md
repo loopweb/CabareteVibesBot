@@ -11,3 +11,5 @@ Automatische Veröffentlichung von YouTube-RSS-Videos auf Telegram.
 - Das GitHub-Secret `TELEGRAM_BOT_TOKEN` bleibt unverändert.
 - Telegram erlaubt maximal 1024 Zeichen als Bildunterschrift; Beschreibungen werden daher gekürzt.
 - Bereits bestehende Telegram-Beiträge werden nicht automatisch gelöscht.
+
+V3: Beschreibung pro Telegram-Beitrag maximal 300 Zeichen (ohne reine Hashtag-Zeilen). Zum erneuten Test unter Actions `replay_recent` aktivieren.

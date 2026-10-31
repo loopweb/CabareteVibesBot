@@ -55,11 +55,22 @@ def send(vid, title, description, thumbnail):
     link = f'https://www.youtube.com/watch?v={vid}'
     header = f'🎶 {title.strip()}'
     footer = f'\n\n▶️ {link}'
-    # Telegram photo captions allow up to 1024 characters.
-    available = max(0, 1024 - len(header) - len(footer) - 2)
-    excerpt = description[:available].rstrip()
-    if len(description) > available and excerpt:
-        excerpt = excerpt[:-1].rstrip() + '…' if len(excerpt) == available else excerpt + '…'
+    # Keep Telegram posts short and remove promotional hashtag lines.
+    cleaned = []
+    for line in description.splitlines():
+        line = line.strip()
+        if not line:
+            if cleaned and cleaned[-1] != '':
+                cleaned.append('')
+            continue
+        if line.startswith('#') or re.fullmatch(r'(?:#[\w-]+\s*)+', line):
+            continue
+        cleaned.append(line)
+    short_description = '\n'.join(cleaned).strip()
+    limit = min(300, max(0, 1024 - len(header) - len(footer) - 2))
+    excerpt = short_description[:limit].rstrip()
+    if len(short_description) > limit and excerpt:
+        excerpt = excerpt.rstrip(' .,;:') + '…'
     caption = header + ('\n\n' + excerpt if excerpt else '') + footer
     try:
         telegram('sendPhoto', {'chat_id': CHAT, 'photo': thumbnail, 'caption': caption})
