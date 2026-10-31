@@ -3,6 +3,7 @@ import json
 import os
 import re
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -11,54 +12,62 @@ from pathlib import Path
 FEED = 'https://www.youtube.com/feeds/videos.xml?channel_id=UCCujh8Bdc8hhaMI9CjhF-6w'
 STATE = Path('posted_videos.json')
 TOKEN = os.environ['TELEGRAM_BOT_TOKEN'].strip()
-CHAT = os.environ.get('TELEGRAM_CHAT_ID', '@CabareteVibes')
-NS = {
-    'atom': 'http://www.w3.org/2005/Atom',
-    'yt': 'http://www.youtube.com/xml/schemas/2015',
-    'media': 'http://search.yahoo.com/mrss/',
-}
+CHAT = os.environ.get('TELEGRAM_CHAT_ID', '@CabareteVibes').strip()
+REPLAY = os.environ.get('REPLAY_RECENT', 'false').lower() == 'true'
+NS = {'atom': 'http://www.w3.org/2005/Atom', 'yt': 'http://www.youtube.com/xml/schemas/2015', 'media': 'http://search.yahoo.com/mrss/'}
 
 
 def get_feed():
-    request = urllib.request.Request(FEED, headers={'User-Agent': 'CabareteVibesBot/1.1'})
-    with urllib.request.urlopen(request, timeout=30) as response:
+    req = urllib.request.Request(FEED, headers={'User-Agent': 'CabareteVibesBot/2.0'})
+    with urllib.request.urlopen(req, timeout=30) as response:
         root = ET.fromstring(response.read())
     videos = []
     for entry in root.findall('atom:entry', NS):
         vid = entry.findtext('yt:videoId', namespaces=NS)
-        title = entry.findtext('atom:title', default='Neues Video', namespaces=NS)
+        if not vid:
+            continue
+        title = entry.findtext('atom:title', default='Nuevo video', namespaces=NS)
         published = entry.findtext('atom:published', default='', namespaces=NS)
-        # YouTube usually supplies a description under media:group/media:description.
         description = entry.findtext('media:group/media:description', default='', namespaces=NS)
-        description = html.unescape(description or '')
-        description = re.sub(r'\r\n?', '\n', description).strip()
-        if vid:
-            videos.append((published, vid, title, description))
+        description = re.sub(r'\r\n?', '\n', html.unescape(description or '')).strip()
+        thumbnail = entry.find('media:group/media:thumbnail', NS)
+        thumb_url = thumbnail.get('url', '') if thumbnail is not None else ''
+        if not thumb_url:
+            thumb_url = f'https://i.ytimg.com/vi/{vid}/hqdefault.jpg'
+        videos.append((published, vid, title, description, thumb_url))
     return sorted(videos)
 
 
-def send(vid, title, description):
-    link = f'https://www.youtube.com/watch?v={vid}'
-    header = f'🎶 {title.strip()}\n\n'
-    footer = f'\n\n{link}'
-    # Telegram sendMessage accepts at most 4096 characters.
-    available = 4096 - len(header) - len(footer)
-    if description and available > 0:
-        if len(description) > available:
-            description = description[:max(0, available - 1)].rstrip() + '…'
-        message = header + description + footer
-    else:
-        message = header.rstrip() + footer
-    body = urllib.parse.urlencode({
-        'chat_id': CHAT,
-        'text': message,
-        'disable_web_page_preview': 'false',
-    }).encode('utf-8')
-    request = urllib.request.Request(f'https://api.telegram.org/bot{TOKEN}/sendMessage', data=body)
-    with urllib.request.urlopen(request, timeout=30) as response:
-        result = json.load(response)
+def telegram(method, params):
+    data = urllib.parse.urlencode(params).encode('utf-8')
+    req = urllib.request.Request(f'https://api.telegram.org/bot{TOKEN}/{method}', data=data)
+    try:
+        with urllib.request.urlopen(req, timeout=40) as response:
+            result = json.load(response)
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode('utf-8', errors='replace')
+        raise RuntimeError(f'Telegram {method} failed (HTTP {exc.code}): {detail}') from exc
     if not result.get('ok'):
-        raise RuntimeError('Telegram did not confirm publication')
+        raise RuntimeError(f'Telegram {method} failed: {result.get("description", "unknown error")}')
+
+
+def send(vid, title, description, thumbnail):
+    link = f'https://www.youtube.com/watch?v={vid}'
+    header = f'🎶 {title.strip()}'
+    footer = f'\n\n▶️ {link}'
+    # Telegram photo captions allow up to 1024 characters.
+    available = max(0, 1024 - len(header) - len(footer) - 2)
+    excerpt = description[:available].rstrip()
+    if len(description) > available and excerpt:
+        excerpt = excerpt[:-1].rstrip() + '…' if len(excerpt) == available else excerpt + '…'
+    caption = header + ('\n\n' + excerpt if excerpt else '') + footer
+    try:
+        telegram('sendPhoto', {'chat_id': CHAT, 'photo': thumbnail, 'caption': caption})
+    except RuntimeError as exc:
+        # If a thumbnail is unavailable, do not lose the post.
+        print(f'Photo failed for {vid}; falling back to text: {exc}')
+        text = caption[:4096]
+        telegram('sendMessage', {'chat_id': CHAT, 'text': text, 'link_preview_options': json.dumps({'is_disabled': True})})
 
 
 def main():
@@ -66,18 +75,18 @@ def main():
     videos = get_feed()
     if not videos:
         raise RuntimeError('No videos returned by RSS feed')
-    candidates = videos[-10:] if not STATE.exists() else videos
+    selected = videos[-10:] if REPLAY or not STATE.exists() else videos
     count = 0
-    for _, vid, title, description in candidates:
-        if vid in posted:
+    for _, vid, title, description, thumbnail in selected:
+        if not REPLAY and vid in posted:
             continue
-        send(vid, title, description)
+        send(vid, title, description, thumbnail)
         posted.add(vid)
-        STATE.write_text(json.dumps(sorted(posted), indent=2) + '\n', encoding='utf-8')
+        STATE.write_text(json.dumps(sorted(posted), ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
         count += 1
-        print(f'Published {vid}: {title} (description: {len(description)} chars)')
+        print(f'Published {vid}: {title} ({len(description)} description chars)')
         time.sleep(30)
-    print(f'Done; published: {count}')
+    print(f'Done; published: {count}; replay mode: {REPLAY}')
 
 
 if __name__ == '__main__':
