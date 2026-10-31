@@ -84,23 +84,6 @@ def send(vid, title, description, thumbnail):
         telegram('sendMessage', {'chat_id': CHAT, 'text': text, 'link_preview_options': json.dumps({'is_disabled': True})})
 
 
-def duration_seconds(video_id):
-    """Read the actual video duration; skip on lookup failure rather than posting a Short."""
-    import yt_dlp
-    url = f'https://www.youtube.com/watch?v={video_id}'
-    opts = {'quiet': True, 'no_warnings': True, 'skip_download': True,
-            'extract_flat': False, 'noplaylist': True,
-            'socket_timeout': 20, 'retries': 2}
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-        duration = info.get('duration') if info else None
-        return float(duration) if duration is not None else None
-    except Exception as exc:
-        print(f'Could not determine duration for {video_id}: {exc}')
-        return None
-
-
 def main():
     posted = set(json.loads(STATE.read_text(encoding='utf-8'))) if STATE.exists() else set()
     videos = get_feed()
@@ -110,15 +93,6 @@ def main():
     count = 0
     for _, vid, title, description, thumbnail in selected:
         if not REPLAY and vid in posted:
-            continue
-        duration = duration_seconds(vid)
-        if duration is None:
-            print(f'Skipped {vid}: duration unavailable; will retry on next regular run')
-            continue
-        if duration <= 120:
-            print(f'Skipped {vid}: only {duration:.0f} seconds (must be over 120)')
-            posted.add(vid)
-            STATE.write_text(json.dumps(sorted(posted), ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
             continue
         send(vid, title, description, thumbnail)
         posted.add(vid)

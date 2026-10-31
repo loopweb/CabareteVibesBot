@@ -1,0 +1,1 @@
+V7: Keine Laufzeitpruefung; Shorts werden mitveroeffentlicht. 15 RSS-Eintraege im Replay, 250 Zeichen Beschreibung. Auf GitHub nur bot.py und .github/workflows/rss-to-telegram.yml ersetzen. posted_videos.json NICHT ersetzen oder loeschen.
