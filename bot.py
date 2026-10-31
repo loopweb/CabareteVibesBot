@@ -66,8 +66,11 @@ def send(vid, title, description, thumbnail):
         if line.startswith('#') or re.fullmatch(r'(?:#[\w-]+\s*)+', line):
             continue
         cleaned.append(line)
-    short_description = '\n'.join(cleaned).strip()
-    limit = min(300, max(0, 1024 - len(header) - len(footer) - 2))
+    short_description = ' '.join(cleaned).strip()
+    # Avoid repeating the video's title at the beginning of its description.
+    if short_description.casefold().startswith(title.strip().casefold()):
+        short_description = short_description[len(title.strip()):].lstrip(' -–—:|').strip()
+    limit = min(250, max(0, 1024 - len(header) - len(footer) - 2))
     excerpt = short_description[:limit].rstrip()
     if len(short_description) > limit and excerpt:
         excerpt = excerpt.rstrip(' .,;:') + '…'
@@ -81,15 +84,41 @@ def send(vid, title, description, thumbnail):
         telegram('sendMessage', {'chat_id': CHAT, 'text': text, 'link_preview_options': json.dumps({'is_disabled': True})})
 
 
+def duration_seconds(video_id):
+    """Read the actual video duration; skip on lookup failure rather than posting a Short."""
+    import yt_dlp
+    url = f'https://www.youtube.com/watch?v={video_id}'
+    opts = {'quiet': True, 'no_warnings': True, 'skip_download': True,
+            'extract_flat': False, 'noplaylist': True,
+            'socket_timeout': 20, 'retries': 2}
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+        duration = info.get('duration') if info else None
+        return float(duration) if duration is not None else None
+    except Exception as exc:
+        print(f'Could not determine duration for {video_id}: {exc}')
+        return None
+
+
 def main():
     posted = set(json.loads(STATE.read_text(encoding='utf-8'))) if STATE.exists() else set()
     videos = get_feed()
     if not videos:
         raise RuntimeError('No videos returned by RSS feed')
-    selected = videos[-10:] if REPLAY or not STATE.exists() else videos
+    selected = videos[-15:] if REPLAY or not STATE.exists() else videos
     count = 0
     for _, vid, title, description, thumbnail in selected:
         if not REPLAY and vid in posted:
+            continue
+        duration = duration_seconds(vid)
+        if duration is None:
+            print(f'Skipped {vid}: duration unavailable; will retry on next regular run')
+            continue
+        if duration <= 120:
+            print(f'Skipped {vid}: only {duration:.0f} seconds (must be over 120)')
+            posted.add(vid)
+            STATE.write_text(json.dumps(sorted(posted), ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
             continue
         send(vid, title, description, thumbnail)
         posted.add(vid)
