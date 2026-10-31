@@ -1,6 +1,12 @@
 name: YouTube RSS to Telegram
 on:
   workflow_dispatch:
+    inputs:
+      replay_recent:
+        description: 'Einmalig die letzten 10 Videos erneut posten'
+        required: false
+        type: boolean
+        default: false
   schedule:
     - cron: "0 10 * * *"
 permissions:
@@ -20,6 +26,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: '@CabareteVibes'
+          REPLAY_RECENT: ${{ inputs.replay_recent || 'false' }}
         run: python bot.py
       - name: Save posted IDs
         run: |
